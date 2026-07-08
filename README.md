@@ -47,7 +47,7 @@ detector_digitos_web/
 ├── app.py              # Backend Flask
 ├── templates/
 │   └── index.html      # Frontend
-├── modelo_digitos.keras  # Modelo (no incluido en Git)
+├── modelo_digitos.keras  # Modelo entrenado
 ├── requirements.txt    # Dependencias
 └── README.md
 ```
