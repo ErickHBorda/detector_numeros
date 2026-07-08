@@ -15,9 +15,8 @@ pip install -r requirements.txt
 
 ## 📱 Configuración
 
-1. Descarga `modelo_digitos.keras` desde [Google Drive](TU_ENLACE)
-2. Instala "IP Webcam" en tu celular
-3. Edita `app.py` y cambia `IP_WEBCAM` con tu IP
+1. Instala "IP Webcam" en tu celular
+2. Edita `app.py` y cambia `IP_WEBCAM` con tu IP
 
 ## ▶️ Ejecutar
 
