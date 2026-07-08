@@ -2,7 +2,6 @@ from flask import Flask, render_template, Response, jsonify
 import cv2
 import numpy as np
 import tensorflow as tf
-import urllib.request
 
 app = Flask(__name__)
 
@@ -17,12 +16,16 @@ nombres_clases = ["cero", "uno", "dos", "tres", "cuatro",
 # ⚠️ CAMBIA ESTA IP por la que te dio IP Webcam
 IP_WEBCAM = "http://10.217.124.17:8080"
 
-# Variable global para almacenar la última predicción
-ultima_prediccion = {
-    'prediction': 'Esperando...',
-    'number': -1,
-    'confidence': 0
+# Variables globales
+estado = {
+    'activo': False,
+    'prediccion': 'Esperando...',
+    'numero': -1,
+    'confianza': 0,
+    'historial': []
 }
+
+cap = None
 
 def predecir_frame(frame):
     """Preprocesa el frame y devuelve la predicción"""
@@ -43,40 +46,63 @@ def predecir_frame(frame):
 
 def generar_frames():
     """Captura video de IP Webcam y devuelve frames procesados"""
-    global ultima_prediccion
+    global estado, cap
     
-    # URL del stream de video de IP Webcam
     url = f"{IP_WEBCAM}/video"
     
-    # Abrir el stream con OpenCV
-    cap = cv2.VideoCapture(url)
-    
-    contador = 0
-    while True:
+    while estado['activo']:
+        if cap is None or not cap.isOpened():
+            cap = cv2.VideoCapture(url)
+            if not cap.isOpened():
+                print("Error al conectar con la cámara, reintentando...")
+                import time
+                time.sleep(2)
+                continue
+        
         ret, frame = cap.read()
         if not ret:
-            print("Error al leer frame, reintentando...")
+            print("Error al leer frame, reconectando...")
             cap.release()
-            cap = cv2.VideoCapture(url)
+            cap = None
             continue
         
-        # Cada 10 frames, hacer predicción (para no saturar)
-        if contador % 10 == 0:
-            ultima_prediccion = predecir_frame(frame)
+        # Hacer predicción
+        resultado = predecir_frame(frame)
+        estado['prediccion'] = resultado['prediction']
+        estado['numero'] = resultado['number']
+        estado['confianza'] = resultado['confidence']
         
-        # Dibujar la predicción en el frame
-        texto = f"{ultima_prediccion['prediction'].upper()} ({ultima_prediccion['confidence']}%)"
-        cv2.putText(frame, texto, (10, 50), 
-                    cv2.FONT_HERSHEY_SIMPLEX, 1.5, (0, 255, 0), 3)
+        # Agregar al historial (últimos 10)
+        estado['historial'].append({
+            'numero': resultado['number'],
+            'confianza': resultado['confidence']
+        })
+        if len(estado['historial']) > 10:
+            estado['historial'].pop(0)
+        
+        # Dibujar predicción en el frame
+        color = (0, 255, 136) if resultado['confidence'] > 80 else (0, 200, 255)
+        texto = f"{resultado['prediction'].upper()} ({resultado['confidence']}%)"
+        
+        # Fondo semitransparente para el texto
+        overlay = frame.copy()
+        cv2.rectangle(overlay, (10, 10), (400, 80), (0, 0, 0), -1)
+        cv2.addWeighted(overlay, 0.5, frame, 0.5, 0, frame)
+        
+        cv2.putText(frame, texto, (20, 60), 
+                    cv2.FONT_HERSHEY_SIMPLEX, 1.5, color, 3)
         
         # Convertir frame a JPEG
-        ret, buffer = cv2.imencode('.jpg', frame)
+        ret, buffer = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, 85])
         frame_bytes = buffer.tobytes()
         
         yield (b'--frame\r\n'
                b'Content-Type: image/jpeg\r\n\r\n' + frame_bytes + b'\r\n')
-        
-        contador += 1
+    
+    # Liberar cámara cuando se detiene
+    if cap is not None:
+        cap.release()
+        cap = None
 
 @app.route('/')
 def index():
@@ -88,10 +114,34 @@ def video_feed():
     return Response(generar_frames(),
                     mimetype='multipart/x-mixed-replace; boundary=frame')
 
-@app.route('/get_prediction')
-def get_prediction():
-    """Devuelve la última predicción en JSON"""
-    return jsonify(ultima_prediccion)
+@app.route('/api/start', methods=['POST'])
+def start_detection():
+    """Iniciar detección"""
+    estado['activo'] = True
+    return jsonify({'status': 'started', 'message': 'Detección iniciada'})
+
+@app.route('/api/stop', methods=['POST'])
+def stop_detection():
+    """Detener detección"""
+    estado['activo'] = False
+    return jsonify({'status': 'stopped', 'message': 'Detección detenida'})
+
+@app.route('/api/status')
+def get_status():
+    """Devuelve el estado actual"""
+    return jsonify({
+        'activo': estado['activo'],
+        'prediccion': estado['prediccion'],
+        'numero': estado['numero'],
+        'confianza': estado['confianza'],
+        'historial': estado['historial']
+    })
+
+@app.route('/api/reset', methods=['POST'])
+def reset_historial():
+    """Reiniciar historial"""
+    estado['historial'] = []
+    return jsonify({'status': 'reset', 'message': 'Historial reiniciado'})
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000, debug=False)
